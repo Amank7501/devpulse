@@ -1,0 +1,61 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: devpulse-postgres
+    environment:
+      POSTGRES_DB: devpulse
+      POSTGRES_USER: devpulse
+      POSTGRES_PASSWORD: devpulse
+    ports: ["5432:5432"]
+    volumes: [pg_data:/var/lib/postgresql/data]
+    networks: [devpulse-net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U devpulse"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: devpulse-redis
+    ports: ["6379:6379"]
+    volumes: [redis_data:/data]
+    networks: [devpulse-net]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: ./backend
+    container_name: devpulse-backend
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://devpulse:devpulse@postgres:5432/devpulse
+      REDIS_URL: redis://redis:6379
+      NODE_ENV: production
+      PORT: 3000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports: ["3000:3000"]
+    networks: [devpulse-net]
+
+  client:
+    build: ./client
+    container_name: devpulse-client
+    depends_on:
+      - backend
+    ports: ["80:80"]
+    networks: [devpulse-net]
+
+volumes:
+  pg_data:
+  redis_data:
+
+networks:
+  devpulse-net:
+    driver: bridge
