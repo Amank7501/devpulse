@@ -1,65 +1,103 @@
-# Dev Pulse
+<div align="center">
 
-Dev Pulse is a GitHub activity dashboard with a React client, an Express API, PostgreSQL, Redis, BullMQ sync jobs, and WebSocket live updates.
+# DevPulse
 
-## Environment
+### Full-stack GitHub activity analytics dashboard with real-time sync and contribution insights
 
-Create a `.env` file in the repo root before running Docker.
+![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=flat&logo=typescript&logoColor=white)
+![React](https://img.shields.io/badge/React-20232A?style=flat&logo=react&logoColor=61DAFB)
+![Node.js](https://img.shields.io/badge/Node.js-339933?style=flat&logo=nodedotjs&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-316192?style=flat&logo=postgresql&logoColor=white)
+![Redis](https://img.shields.io/badge/Redis-DC382D?style=flat&logo=redis&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat&logo=docker&logoColor=white)
 
-| Variable | Description | Example |
-| --- | --- | --- |
-| `DATABASE_URL` | PostgreSQL connection string used by the backend | `postgres://devpulse:devpulse@postgres:5432/devpulse` |
-| `REDIS_URL` | Redis connection string used by API, workers, and WebSockets | `redis://redis:6379` |
-| `JWT_SECRET` | Secret used to sign app JWTs | `change-me` |
-| `GITHUB_CLIENT_ID` | GitHub OAuth app client ID | `Iv1...` |
-| `GITHUB_CLIENT_SECRET` | GitHub OAuth app client secret | `...` |
-| `GITHUB_REDIRECT_URI` | GitHub OAuth callback URL | `http://localhost:3000/api/auth/github/callback` |
-| `FRONTEND_URL` | Public frontend URL used after OAuth callback | `http://localhost` |
-| `TOKEN_ENCRYPTION_KEY` | 32-character key for encrypting GitHub access tokens | `12345678901234567890123456789012` |
-| `PORT` | Backend HTTP port | `3000` |
-| `NODE_ENV` | Runtime mode | `production` |
-| `LOG_LEVEL` | Backend log level | `info` |
+![DevPulse Dashboard](./docs/screenshot.png)
 
-## Run With Docker
+</div>
 
-```bash
-docker compose up --build
+---
+
+
+## Architecture
+
+```
+┌──────────────────┐        ┌─────────────────────────────────┐
+│   React Client   │ ──────▶│          Express API            │
+│  Vite + TS       │ ◀───── │  auth · activity · sync · me   │
+│  TanStack Query  │        └────────────┬────────────────────┘
+│  WebSocket hook  │                     │
+└──────────────────┘        ┌────────────▼────────────────────┐
+                            │         PostgreSQL               │
+                            │  users · repos · activity_events │
+                            └────────────┬────────────────────┘
+                            ┌────────────▼────────────────────┐
+                            │            Redis                 │
+                            │  rate limit · etag · bullmq     │
+                            │  pub/sub live:{userId}           │
+                            └─────────────────────────────────┘
 ```
 
-The client is served at `http://localhost` and proxies `/api` and `/ws` to the backend container.
+| Layer | Tech |
+|---|---|
+| Frontend | Vite, React, TypeScript, TanStack Query v5, Recharts |
+| Backend | Node.js, Express, TypeScript |
+| Database | PostgreSQL, Knex ORM |
+| Cache / Queue | Redis, BullMQ |
+| Auth | GitHub OAuth 2.0, JWT, AES encryption |
+| Real-time | WebSockets, Redis pub/sub |
+| DevOps | Docker, docker-compose, nginx |
 
-## Run Migrations
 
-After the containers are built and the database is healthy, run:
+## Project Structure
 
-```bash
-docker compose exec backend npm run db:migrate
+```
+devpulse/
+├── backend/
+│   ├── src/
+│   │   ├── config/            # env, knexfile, redis
+│   │   ├── db/
+│   │   │   ├── migrations/    # all knex migrations
+│   │   │   └── queries/       # activityQueries
+│   │   ├── middleware/        # auth, errorHandler, requestLogger
+│   │   ├── routes/            # auth, activity, sync, me, health
+│   │   ├── services/          # githubClient, syncService, tokenService
+│   │   ├── workers/           # githubSync BullMQ worker
+│   │   └── ws/                # wsServer WebSocket
+│   └── Dockerfile
+├── client/
+│   ├── src/
+│   │   ├── hooks/             # useActivity, useSync, useMe, useActivitySync
+│   │   ├── lib/               # apiClient, queryClient
+│   │   ├── pages/             # Dashboard, Login
+│   │   └── components/        # RequireAuth
+│   └── Dockerfile
+├── docker-compose.yml
+└── README.md
 ```
 
-For a fresh deployment, run migrations before using the app.
 
-## Local Development
 
-Run infrastructure:
+## Features
 
-```bash
-docker compose up postgres redis
-```
+- 🔐 GitHub OAuth 2.0 with CSRF state validation and AES-encrypted token storage
+- 🔄 Real-time sync progress via WebSockets and Redis pub/sub
+- 📊 365-day contribution heatmap (owned + collaborator + org repos)
+- 📈 Event type breakdown, peak activity hours, and repo leaderboard
+- 🔥 Current and longest streak tracking
+- ⚡ Per-repo ETag caching to minimize redundant GitHub API calls
+- 🐳 Fully containerized with multi-stage Docker builds and nginx reverse proxy
 
-Run the backend:
 
-```bash
-cd backend
-npm install
-npm run build
-npm run db:migrate
-npm run dev
-```
 
-Run the client:
 
-```bash
-cd client
-npm install
-npm run dev
-```
+## How It Works
+
+1. **Auth** — User signs in with GitHub OAuth. Access token is AES-encrypted before being stored in the database. A JWT is issued for the session.
+
+2. **Sync** — A BullMQ worker runs every 5 minutes per user. It fetches all accessible repos (owned + collaborator + org) via `/user/repos`, then fetches events per repo using ETags to skip unchanged repos. Only the user's own actions are stored.
+
+3. **Rate limiting** — Before each GitHub API call, remaining rate limit is checked in Redis. If below 100, sync is paused and retried with exponential backoff.
+
+4. **Real-time** — When a sync completes, the worker publishes to a Redis channel. The WebSocket server forwards progress messages to the connected client. React Query invalidates and re-fetches automatically.
+
+5. **Analytics** — All visualizations (heatmap, streaks, peak hours, leaderboard) are derived client-side from the activity data returned by the API.
